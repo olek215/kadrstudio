@@ -62,7 +62,7 @@ export function findKeywords(words, rules) {
       }
       if (!ok) continue;
       const t = words[i].t0;
-      if (t - (lastBy[r.id] ?? -9) < 2.5 || t - lastAny < 0.9) break;
+      if (t - (lastBy[r.id] ?? -9) < 2.5 || t - lastAny < 0.45) break;
       hits.push({ t, rule: r, word: words[i].w });
       lastBy[r.id] = t;
       lastAny = t;
@@ -92,14 +92,17 @@ export async function applySpeechFx(app, hits, o) {
   };
   const sndCache = {};
   let n = 0;
-  for (const hit of hits) {
+  hits = [...hits].sort((a, b) => a.t - b.t);
+  for (let hi = 0; hi < hits.length; hi++) {
+    const hit = hits[hi];
     const r = hit.rule;
+    const room = hits[hi + 1] ? Math.max(0.3, hits[hi + 1].t - hit.t - 0.05) : 9; // miejsce do następnego słowa-klucza
     if (o.sounds && r.sound && r.sound !== 'none') {
       const m = sndCache[r.sound] || (sndCache[r.sound] = await soundMedia(app, r.sound));
       if (m) {
         const tr = named('audio', 'Efekty dźwiękowe');
         const c = makeMediaClip(P, m, tr.id, Math.max(0, hit.t - 0.04));
-        c.duration = Math.min(m.duration, 1.3);
+        c.duration = Math.min(m.duration, 1.3, room + 0.04);
         c.volume = o.volume;
         c.aFadeOut = Math.min(0.3, c.duration * 0.3);
         c.auto = 'speechfx';
@@ -114,6 +117,7 @@ export async function applySpeechFx(app, hits, o) {
       const tr = named('fx', 'Efekty');
       const def = FX_TYPES[r.fx];
       const c = makeFxClip(tr.id, hit.t, r.fx, def);
+      c.duration = Math.min(c.duration, room);
       c.dir = n % 2 ? -1 : 1;
       c.auto = 'speechfx';
       const nxt = P.clips.filter((x) => x.trackId === tr.id && x.start >= hit.t && x !== c).sort((a, b) => a.start - b.start)[0];
@@ -125,7 +129,7 @@ export async function applySpeechFx(app, hits, o) {
       const c = makeTextClip(tr.id, hit.t, {
         text: r.sticker, name: 'Naklejka', font: 'Segoe UI Emoji', weight: 400, size: 230, strokeW: 0,
         animIn: 'pop', animOut: 'pop', animDur: 0.25, loop: 'wiggle', shadow: 18, shadowColor: '#000000',
-        x: (n % 2 ? 1 : -1) * 0.24, y: -0.24, duration: 1.4,
+        x: (n % 2 ? 1 : -1) * 0.24, y: -0.24, duration: Math.min(1.4, room),
       });
       c.auto = 'speechfx';
       const nxt = P.clips.filter((x) => x.trackId === tr.id && x.start >= hit.t).sort((a, b) => a.start - b.start)[0];

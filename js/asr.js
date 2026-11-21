@@ -135,6 +135,12 @@ async function transcribeLocal(buf, onStatus) {
   return { segments, language: 'pl', model: 'whisper-base (aplikacja)', engine: 'local' };
 }
 
+// Fragmenty z głosem po samej głośności (gdy rozpoznawanie mowy nie zadziała) – w sekundach.
+export async function voiceSegments(buf) {
+  const x = (await to16k(buf)).getChannelData(0);
+  return speechChunks(x).map(([a, b]) => ({ start: a / SR, end: b / SR }));
+}
+
 // ------------------------------------------------------------------ wspólne
 // Rozpoznaje mowę w kilku plikach i opisuje postęp w okienku (ui.line / ui.sub).
 export async function transcribeAll(app, list, ui) {
@@ -163,7 +169,8 @@ export async function transcribeAll(app, list, ui) {
 
 export async function transcribeMedia(app, m, onStatus) {
   if (m.transcript && m.transcript.segments) return m.transcript;
-  if (!m.audio) throw new Error(`„${m.name}” nie ma dźwięku albo jeszcze się wczytuje`);
+  if (!m.audio && m.audioReady) { onStatus && onStatus(`Czytam dźwięk z „${m.name}”…`); await m.audioReady; }
+  if (!m.audio) throw new Error(m.audioError || `Nie mogę odczytać dźwięku z „${m.name}”`);
   const eng = await speechEngine(app);
   if (!eng) throw new Error('To urządzenie nie potrafi rozpoznawać mowy.');
   const tr = eng.kind === 'server' ? await transcribeServer(m.audio) : await transcribeLocal(m.audio, onStatus);

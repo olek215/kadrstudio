@@ -291,7 +291,8 @@ export class MediaManager {
       this._emit(m);
       // w tle: miniatury i dźwięk
       this._videoThumbs(m).catch((e) => console.warn('miniatury', e));
-      this._decodeAudio(m).catch(() => {});
+      // obietnica „dźwięk gotowy” – Auto-montaż i rozpoznawanie mowy czekają na nią (na telefonie to trwa)
+      m.audioReady = this._decodeAudio(m).catch(() => {});
       return;
     }
     if (m.type === 'audio') {
@@ -358,6 +359,7 @@ export class MediaManager {
         buf = await ac.decodeAudioData(await m.blob.arrayBuffer());
       } catch (e) {
         m.hasAudio = false;
+        if (m.type === 'video') m.audioError = `Nie mogę odczytać dźwięku z „${m.name}”`;
         if (required) throw new Error(`Nie można odczytać dźwięku „${m.name}”`);
         this._emit(m);
         return;

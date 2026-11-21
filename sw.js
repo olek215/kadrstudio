@@ -1,7 +1,7 @@
 // Service worker KadrStudio.
 // Aplikacja zapisuje swoje pliki w telefonie, więc otwiera się i działa nawet przy wyłączonym laptopie
 // (montaż i eksport dzieją się w telefonie). Gdy laptop jest dostępny – zawsze bierze najnowszą wersję.
-const CACHE = 'kadrstudio-v6';
+const CACHE = 'kadrstudio-v7';
 const CORE = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png',

@@ -9,7 +9,7 @@ import { modal, toast } from './ui.js';
 import { clipUtterances, findRetakes, isRestart } from './retakes.js';
 import { buildCaptions, clipWords } from './captions.js';
 import { findKeywords, applySpeechFx, RULES } from './speechfx.js';
-import { transcribeAll, speechEngine } from './asr.js';
+import { transcribeAll, speechEngine, voiceSegments } from './asr.js';
 
 // ------------------------------------------------------------------ style
 // Każdy styl mówi, JAK decydować (np. przejście przy zmianie sceny), a nie losuje efektów.
@@ -344,14 +344,24 @@ export async function buildMontage(app, o, step = () => {}) {
 
   // ---------------- co jest w filmach: obraz (sceny, ruch, kolory) i mowa
   const vids = visual.filter((m) => m.type === 'video');
+  // na telefonie dźwięk z filmu wczytuje się chwilę – bez niego nie da się rozpoznać mowy ani odtworzyć głosu
+  const pendingAudio = vids.filter((m) => m.audioReady && !m.audio);
+  if (pendingAudio.length) { step('audio'); await Promise.all(pendingAudio.map((m) => m.audioReady)); }
+  const warnings = [];
+  for (const m of vids) if (m.audioError) warnings.push(`brak dźwięku: ${m.name}`);
   for (let i = 0; i < vids.length; i++) { step('shots', i + 1, vids.length); await analyzeVideo(vids[i]); }
   if (o.speech !== false && vids.some((m) => m.hasAudio) && (await speechEngine(app))) {
     try {
       await transcribeAll(app, vids.filter((m) => m.hasAudio && m.duration <= 300), { line: () => step('speech'), sub: (txt) => step('speech', 0, 0, txt) });
-    } catch (e) { console.warn('mowa', e); }
+    } catch (e) {
+      console.warn('mowa', e);
+      warnings.push('mowa nierozpoznana – cięcia po głośności');
+    }
   }
+  const keepSound = S.keepAudio || o.clipAudio === 'keep';
   for (const m of vids) {
     m._utts = [];
+    m._voiceOnly = false;
     if (m.transcript && m.transcript.segments && m.transcript.segments.length) {
       const whole = { id: m.id, trackId: '-', start: 0, in: 0, duration: m.duration, speed: 1 };
       const utts = clipUtterances(whole, m.transcript).filter((u) => u.tokens.length >= 2 || (u.tokens.length === 1 && u.srcEnd - u.srcStart > 0.35));
@@ -363,6 +373,12 @@ export async function buildMontage(app, o, step = () => {}) {
       }
       m._utts = utts.filter((u) => !drop.has(u) && !isRestart(u));
     }
+    // vlog bez rozpoznanej mowy: fragmenty z głosem po głośności (ciche przerwy wypadają)
+    if (!m._utts.length && keepSound && m.audio) {
+      const reg = await voiceSegments(m.audio);
+      m._utts = reg.filter((r) => r.end - r.start > 0.3).map((r) => ({ srcStart: r.start, srcEnd: Math.min(m.duration, r.end), tokens: ['_'], text: '' }));
+      m._voiceOnly = m._utts.length > 0;
+    }
     const sd = m._utts.reduce((s, u) => s + (u.srcEnd - u.srcStart), 0);
     m._speech = m._utts.length > 0 && sd >= Math.min(2.5, m.duration * 0.25);
     m._uidx = 0;
@@ -372,11 +388,13 @@ export async function buildMontage(app, o, step = () => {}) {
 
   // ---------------- długość
   const speechTotal = vids.filter((m) => m._speech).reduce((s, m) => s + m._utts.reduce((a, u) => a + (u.srcEnd - u.srcStart) + 0.37, 0), 0);
-  const material = visual.filter((m) => !m._speech).reduce((s, m) => s + (m.type === 'image' ? S.photoMin * 1.3 : Math.min(m.duration, 10) * 0.7), 0);
+  // ile materiału „warto” pokazać: długi film = dłuższy montaż (wcześniej max ~7 s z filmu)
+  const use = { energy: 0.35, calm: 0.5, cinema: 0.45, vlog: 0.8 }[o.style] || 0.5;
+  const material = visual.filter((m) => !m._speech).reduce((s, m) => s + (m.type === 'image' ? S.photoMin * 1.3 : clamp(m.duration * use, Math.min(m.duration, 2), 45)), 0);
   const musicLen = music ? music.duration - mIn : Infinity;
   let T;
   if (o.length === 'music') T = music ? Math.min(musicLen, 240) : clamp(material + speechTotal, 6, 90);
-  else if (o.length === 'auto') T = anySpeech ? clamp(speechTotal + material * 0.5, 6, 150) : Math.min(clamp(material, 8, 60), musicLen);
+  else if (o.length === 'auto') T = anySpeech ? clamp(speechTotal + material * 0.5, 6, 180) : clamp(material, 6, 120);
   else T = +o.length;
   const q = energy ? [...energy].sort((a, b) => a - b) : null;
   const qAt = (f) => (q ? q[Math.min(q.length - 1, Math.floor(q.length * f))] : 0.5);
@@ -493,7 +511,7 @@ export async function buildMontage(app, o, step = () => {}) {
       c.in = sg.src;
       c.speed = +sg.speed.toFixed(4);
       if (sg.speech) { c.muted = false; c.volume = 1; }
-      else if (ca === 'keep') c.volume = 1;
+      else if (ca === 'keep' || (S.keepAudio && ca !== 'mute')) c.volume = 1;
       else if (ca === 'low') c.volume = 0.3;
       else c.muted = true;
       // ruch kamery tylko na nieruchomych ujęciach – filmy z ruchem same „żyją”
@@ -566,7 +584,7 @@ export async function buildMontage(app, o, step = () => {}) {
   }
 
   // ---------------- mowa: napisy i efekty przy słowach-kluczach
-  const speechMade = segs.filter((s) => s.speech).map((s) => s.clip);
+  const speechMade = segs.filter((s) => s.speech && !s.m._voiceOnly).map((s) => s.clip);
   let caps = 0, keyFx = 0;
   if (speechMade.length && o.captions !== false) {
     const big = S.captions === 'big';
@@ -589,7 +607,7 @@ export async function buildMontage(app, o, step = () => {}) {
     app.loadFont(tc);
   }
   normalize(P);
-  const extra = [];
+  const extra = [...warnings];
   if (speechMade.length) extra.push(`mowa: ${speechMade.length} ${speechMade.length === 1 ? 'fragment' : 'fragmenty'}`);
   if (caps) extra.push(`napisy: ${caps}`);
   if (keyFx) extra.push(`efekty ze słów: ${keyFx}`);
@@ -716,7 +734,7 @@ export function openAutoMontage(app, opts = {}) {
     const opt = { ...o, clipAudio: o.clipAudio || 'auto', mediaIds: visual.filter((v) => sel.has(v.id)).map((v) => v.id), seed: (Date.now() ^ (Math.random() * 1e9)) & 0x7fffffff };
     if (!app.store.project.clips.length) opt.replace = true;
     localStorage.setItem(LS, JSON.stringify({ style: o.style, length: o.length, shuffle: o.shuffle, captions: o.captions, speechFx: o.speechFx }));
-    const steps = { load: 'Wczytuję pliki', music: 'Przygotowuję muzykę', rhythm: 'Słucham rytmu muzyki', shots: 'Oglądam filmy: sceny, ruch, ostrość', speech: 'Słucham, co mówisz', build: 'Składam film' };
+    const steps = { load: 'Wczytuję pliki', music: 'Przygotowuję muzykę', rhythm: 'Słucham rytmu muzyki', audio: 'Czytam dźwięk z filmów', shots: 'Oglądam filmy: sceny, ruch, ostrość', speech: 'Słucham, co mówisz', build: 'Składam film' };
     const list = h('div', { class: 'am-steps' });
     const subEl = h('div', { class: 'muted', style: { fontSize: '12.5px', textAlign: 'center', minHeight: '18px' } });
     const show = (key, i, n, txt) => {
