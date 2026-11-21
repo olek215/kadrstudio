@@ -51,17 +51,20 @@ async function getPipeline() {
       T.env.allowLocalModels = false;
       T.env.useBrowserCache = true;
       T.env.backends.onnx.wasm.wasmPaths = new URL('../vendor/transformers/', import.meta.url).href;
+      T.env.backends.onnx.wasm.numThreads = 1;
+      // Telefon: tryb WASM i model skwantowany (mniej pamięci, stabilniej – WebGPU na telefonach
+      // potrafi zawiesić albo zamknąć stronę). Komputer: WebGPU (szybciej).
+      const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) || (navigator.userAgentData && navigator.userAgentData.mobile);
       let gpu = false;
-      try { gpu = !!(navigator.gpu && (await navigator.gpu.requestAdapter())); } catch { gpu = false; }
-      const opts = gpu
-        ? { device: 'webgpu', dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' } }
-        : { device: 'wasm', dtype: 'q8' };
-      opts.progress_callback = (p) => { if (progressCb) progressCb(p); };
+      if (!mobile) { try { gpu = !!(navigator.gpu && (await navigator.gpu.requestAdapter())); } catch { gpu = false; } }
+      const progress_callback = (p) => { if (progressCb) progressCb(p); };
+      const wasm = { device: 'wasm', dtype: { encoder_model: 'q8', decoder_model_merged: 'q8' }, progress_callback };
+      const opts = gpu ? { device: 'webgpu', dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' }, progress_callback } : wasm;
       try {
         return await T.pipeline('automatic-speech-recognition', LOCAL_MODEL, opts);
       } catch (e) {
         if (!gpu) throw e;
-        return T.pipeline('automatic-speech-recognition', LOCAL_MODEL, { device: 'wasm', dtype: 'q8', progress_callback: opts.progress_callback });
+        return T.pipeline('automatic-speech-recognition', LOCAL_MODEL, wasm);
       }
     })();
     pipeP.catch(() => { pipeP = null; });
@@ -98,8 +101,8 @@ function speechChunks(x) {
     if (b - a < 6) continue; // krócej niż 0,12 s – szum
     let s = Math.max(0, (a - 6) * fl), en = Math.min(x.length, (b + 8) * fl);
     const last = out[out.length - 1];
-    if (last && s - last[1] < SR * 0.25 && en - last[0] < SR * 25) { last[1] = en; continue; }
-    while (en - s > SR * 28) { out.push([s, s + SR * 28]); s += SR * 28; }
+    if (last && s - last[1] < SR * 0.25 && en - last[0] < SR * 20) { last[1] = en; continue; }
+    while (en - s > SR * 20) { out.push([s, s + SR * 20]); s += SR * 20; }
     out.push([s, en]);
   }
   return out;

@@ -24,24 +24,131 @@ export function getDecodeInfo(m) {
   return infoCache.get(key);
 }
 
-async function demux(m) {
+export function isMp4Like(m) {
   const name = (m.blob.name || m.name || '').toLowerCase();
   const mime = (m.mime || m.blob.type || '').toLowerCase();
-  if (mime.includes('webm') || mime.includes('matroska') || /\.(webm|mkv)$/.test(name)) throw new Error('format bez MP4');
+  return !(mime.includes('webm') || mime.includes('matroska') || /\.(webm|mkv|avi)$/.test(name));
+}
+
+// Czyta z pliku MP4/MOV tylko nagłówki (ftyp + moov) – bez wczytywania całego filmu do pamięci.
+// To ważne na telefonie: film może mieć setki MB, a nagłówek ma zwykle kilkaset KB.
+export async function openMp4(m) {
+  if (!isMp4Like(m)) throw new Error('format bez MP4');
   await loadMp4box();
   const file = window.MP4Box.createFile();
   let info = null, failure = null;
   file.onReady = (i) => { info = i; };
   file.onError = (e) => { failure = new Error(String(e)); };
   const blob = m.blob;
-  const CH = 8 * 1024 * 1024;
-  for (let off = 0; off < blob.size && !info && !failure; off += CH) {
-    const buf = await blob.slice(off, off + CH).arrayBuffer();
-    buf.fileStart = off;
-    file.appendBuffer(buf);
+  let off = 0, ftyp = null, moov = null;
+  for (let guard = 0; off + 8 <= blob.size && guard < 10000 && !moov; guard++) {
+    const head = new DataView(await blob.slice(off, off + 16).arrayBuffer());
+    let size = head.getUint32(0);
+    const type = String.fromCharCode(head.getUint8(4), head.getUint8(5), head.getUint8(6), head.getUint8(7));
+    if (size === 1) size = head.getUint32(8) * 4294967296 + head.getUint32(12);
+    else if (size === 0) size = blob.size - off;
+    if (size < 8) throw new Error('uszkodzony plik MP4');
+    if (type === 'ftyp' || type === 'moov') {
+      if (size > 200 * 1024 * 1024) throw new Error('za duży nagłówek');
+      const buf = await blob.slice(off, off + size).arrayBuffer();
+      if (type === 'ftyp') ftyp = buf; else moov = buf;
+    }
+    off += size;
   }
+  if (!moov) throw new Error('brak nagłówka moov');
+  // Podajemy bibliotece ftyp+moov „sklejone” – położenie próbek (stco/co64) i tak wskazuje prawdziwy plik.
+  let pos = 0;
+  if (ftyp) { ftyp.fileStart = 0; file.appendBuffer(ftyp); pos = ftyp.byteLength; }
+  moov.fileStart = pos;
+  file.appendBuffer(moov);
+  file.flush();
   if (failure) throw failure;
-  if (!info) { file.flush(); if (!info) throw new Error('brak nagłówka moov'); }
+  if (!info) throw new Error('brak nagłówka moov');
+  return { file, info };
+}
+
+function editShift(file, trak, ts) {
+  let shiftTicks = 0, delaySec = 0;
+  const elst = trak.edts && trak.edts.elst && trak.edts.elst.entries;
+  if (elst && elst.length) {
+    const movieTs = (file.moov && file.moov.mvhd && file.moov.mvhd.timescale) || ts;
+    for (const e of elst) {
+      if (e.media_time === -1) delaySec += e.segment_duration / movieTs;
+      else { shiftTicks = e.media_time; break; }
+    }
+  }
+  return { shiftTicks, delaySec };
+}
+
+// Dźwięk z filmu dekodowany kawałkami (WebCodecs AudioDecoder) – bez wczytywania całego pliku.
+// Zwraca AudioBuffer, null gdy film nie ma dźwięku; rzuca wyjątek, gdy się nie da (wtedy stara metoda).
+export async function decodeAudioTrack(m, ac) {
+  if (!('AudioDecoder' in window)) throw new Error('brak AudioDecoder');
+  const { file, info } = await openMp4(m);
+  const at = info.audioTracks && info.audioTracks[0];
+  if (!at) return null;
+  const trak = file.getTrackById(at.id);
+  const entry = trak.mdia.minf.stbl.stsd.entries[0];
+  let description;
+  try {
+    const dsi = entry.esds && entry.esds.esd && entry.esds.esd.descs && entry.esds.esd.descs[0] && entry.esds.esd.descs[0].descs && entry.esds.esd.descs[0].descs[0];
+    if (dsi && dsi.data) description = new Uint8Array(dsi.data);
+  } catch { /* bez opisu */ }
+  const sr = at.audio.sample_rate, chs = Math.min(2, at.audio.channel_count || 2);
+  const config = { codec: at.codec, sampleRate: sr, numberOfChannels: at.audio.channel_count || 2 };
+  if (description) config.description = description;
+  const sup = await AudioDecoder.isConfigSupported(config);
+  if (!sup.supported) throw new Error('kodek dźwięku nieobsługiwany: ' + at.codec);
+  const S = trak.samples || [];
+  if (!S.length) return null;
+  const ts = at.timescale;
+  const totalSec = S.reduce((s, x) => s + x.duration, 0) / ts;
+  const cap = Math.ceil(totalSec * sr) + sr;
+  const out = Array.from({ length: chs }, () => new Float32Array(cap));
+  let pos = 0, err = null;
+  let tmp = new Float32Array(4096);
+  const dec = new AudioDecoder({
+    output: (ad) => {
+      const n = ad.numberOfFrames;
+      if (tmp.length < n) tmp = new Float32Array(n);
+      for (let c = 0; c < chs; c++) {
+        ad.copyTo(tmp, { planeIndex: Math.min(c, ad.numberOfChannels - 1), format: 'f32-planar' });
+        const k = Math.min(n, cap - pos);
+        if (k > 0) out[c].set(tmp.subarray(0, k), pos);
+      }
+      pos = Math.min(cap, pos + n);
+      ad.close();
+    },
+    error: (e) => { err = e; },
+  });
+  dec.configure(config);
+  let win = null;
+  const bytes = async (s) => {
+    if (win && s.offset >= win.start && s.offset + s.size <= win.end) return win.buf.subarray(s.offset - win.start, s.offset - win.start + s.size);
+    const ab = await m.blob.slice(s.offset, s.offset + Math.max(2 * 1024 * 1024, s.size)).arrayBuffer();
+    win = { start: s.offset, end: s.offset + ab.byteLength, buf: new Uint8Array(ab) };
+    return win.buf.subarray(0, s.size);
+  };
+  for (let i = 0; i < S.length; i++) {
+    if (err) throw err;
+    const s = S[i];
+    dec.decode(new EncodedAudioChunk({ type: 'key', timestamp: Math.round((s.cts / ts) * 1e6), duration: Math.round((s.duration / ts) * 1e6), data: await bytes(s) }));
+    if (dec.decodeQueueSize > 64) await new Promise((r) => setTimeout(r, 0));
+  }
+  await dec.flush();
+  dec.close();
+  if (err) throw err;
+  // lista edycji: pomiń próbki „rozbiegowe” kodera (jak robi to element <video>)
+  const { shiftTicks } = editShift(file, trak, ts);
+  const skip = Math.max(0, Math.min(pos, Math.round((shiftTicks / ts) * sr)));
+  const len = Math.max(1, pos - skip);
+  const buf = ac.createBuffer(chs, len, sr);
+  for (let c = 0; c < chs; c++) buf.copyToChannel(out[c].subarray(skip, skip + len), c);
+  return buf;
+}
+
+async function demux(m) {
+  const { file, info } = await openMp4(m);
   const vt = info.videoTracks && info.videoTracks[0];
   if (!vt) throw new Error('brak ścieżki wideo');
   const trak = file.getTrackById(vt.id);

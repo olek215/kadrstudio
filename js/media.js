@@ -1,6 +1,7 @@
 // Pliki projektu: import, miniatury, dźwięk (dekodowanie + fala), zapis w IndexedDB.
 import { db } from './db.js';
 import { uid, once, sleep } from './util.js';
+import { decodeAudioTrack } from './decoder.js';
 
 const VIDEO_EXT = ['mp4', 'm4v', 'mov', 'webm', 'mkv', 'avi', 'wmv', 'flv', '3gp', 'mts', 'm2ts', 'ts', 'mpg', 'mpeg', 'ogv'];
 const IMAGE_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'avif', 'svg', 'heic'];
@@ -331,17 +332,36 @@ export class MediaManager {
   }
 
   async _decodeAudio(m, required = false) {
-    if (m.blob.size > 1.2 * 1024 * 1024 * 1024) { if (required) throw new Error('Plik audio jest zbyt duży'); return; }
     const ac = this.getAudioCtx();
-    const ab = await m.blob.arrayBuffer();
-    let buf;
-    try {
-      buf = await ac.decodeAudioData(ab);
-    } catch (e) {
-      m.hasAudio = false;
-      if (required) throw new Error(`Nie można odczytać dźwięku „${m.name}”`);
-      this._emit(m);
-      return;
+    let buf = null;
+    // filmy MP4/MOV: dźwięk dekodowany kawałkami – telefon nie musi trzymać w pamięci całego filmu
+    if (m.type === 'video') {
+      try {
+        buf = await decodeAudioTrack(m, ac);
+        if (buf === null) { m.hasAudio = false; this._emit(m); return; }
+      } catch (e) {
+        console.info('[dźwięk] metoda zapasowa dla', m.name, e.message);
+        buf = null;
+      }
+    }
+    if (!buf) {
+      const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+      const limit = mobile ? 300 * 1024 * 1024 : 1.2 * 1024 * 1024 * 1024;
+      if (m.blob.size > limit) {
+        m.hasAudio = false;
+        m.audioError = 'Plik jest za duży, żeby odczytać dźwięk na tym urządzeniu';
+        if (required) throw new Error(`„${m.name}” jest za duży, żeby odczytać dźwięk na tym urządzeniu`);
+        this._emit(m);
+        return;
+      }
+      try {
+        buf = await ac.decodeAudioData(await m.blob.arrayBuffer());
+      } catch (e) {
+        m.hasAudio = false;
+        if (required) throw new Error(`Nie można odczytać dźwięku „${m.name}”`);
+        this._emit(m);
+        return;
+      }
     }
     m.audio = buf;
     m.hasAudio = true;
