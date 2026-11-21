@@ -1,7 +1,7 @@
 // Service worker KadrStudio.
 // Aplikacja zapisuje swoje pliki w telefonie, więc otwiera się i działa nawet przy wyłączonym laptopie
 // (montaż i eksport dzieją się w telefonie). Gdy laptop jest dostępny – zawsze bierze najnowszą wersję.
-const CACHE = 'kadrstudio-v7';
+const CACHE = 'kadrstudio-v8';
 const CORE = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png',
@@ -9,7 +9,7 @@ const CORE = [
   'js/app.js', 'js/util.js', 'js/db.js', 'js/store.js', 'js/model.js', 'js/catalog.js', 'js/media.js',
   'js/renderer.js', 'js/player.js', 'js/stage.js', 'js/timeline.js', 'js/inspector.js', 'js/library.js',
   'js/exporter.js', 'js/automontage.js', 'js/retakes.js', 'js/captions.js', 'js/ui.js', 'js/audio.js', 'js/decoder.js',
-  'js/asr.js', 'js/speechfx.js', 'vendor/transformers/transformers.min.js', 'vendor/transformers/ort-wasm-simd-threaded.jsep.mjs',
+  'js/asr.js', 'js/speechfx.js', 'vendor/transformers/transformers.min.js', 'vendor/transformers/ort-wasm-simd-threaded.jsep.mjs', 'vendor/transformers/probe-worker.js',
 ];
 const FONTS_CSS = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:ital,wght@0,500;0,700;0,900;1,900&family=Poppins:wght@500;700;900&family=Bebas+Neue&family=Anton&family=Bangers&family=Righteous&family=Pacifico&family=Lobster&family=Permanent+Marker&family=Caveat:wght@700&family=Oswald:wght@500;700&family=Playfair+Display:ital,wght@0,700;1,700&family=Press+Start+2P&family=Rubik+Mono+One&display=swap';
 
@@ -30,6 +30,16 @@ self.addEventListener('activate', (e) => {
     await self.clients.claim();
   })());
 });
+
+// Nagłówki „izolacji” strony – dzięki nim rozpoznawanie mowy może liczyć na wielu rdzeniach telefonu
+// (GitHub Pages nie pozwala ustawić ich na serwerze, więc dokłada je service worker).
+function isolate(res) {
+  if (!res || res.type === 'opaque' || res.status === 0) return res;
+  const h = new Headers(res.headers);
+  h.set('Cross-Origin-Opener-Policy', 'same-origin');
+  h.set('Cross-Origin-Embedder-Policy', 'credentialless');
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+}
 
 function fromNetwork(req, ms) {
   return new Promise((res, rej) => {
@@ -54,21 +64,25 @@ self.addEventListener('fetch', (e) => {
     })));
     return;
   }
+  // strona i jej wątki (workery rozpoznawania mowy) muszą mieć te same nagłówki izolacji
+  const nav = req.mode === 'navigate';
+  const iso = nav || req.destination === 'worker' || req.destination === 'sharedworker';
   e.respondWith((async () => {
+    let out;
     try {
       const res = await fromNetwork(req, 4000);
       if (res && res.ok) {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
-        return res;
+        out = res;
+      } else {
+        out = (await caches.match(req, { ignoreSearch: true })) || res;
       }
-      const hit = await caches.match(req, { ignoreSearch: true });
-      return hit || res;
     } catch {
-      const hit = await caches.match(req, { ignoreSearch: true });
-      if (hit) return hit;
-      if (req.mode === 'navigate') return (await caches.match('./')) || (await caches.match('index.html')) || Response.error();
-      return Response.error();
+      out = await caches.match(req, { ignoreSearch: true });
+      if (!out && nav) out = (await caches.match('./')) || (await caches.match('index.html'));
+      if (!out) return Response.error();
     }
+    return iso ? isolate(out) : out;
   })());
 });

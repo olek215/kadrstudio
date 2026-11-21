@@ -4,6 +4,8 @@ import { propAt, setPropAt, hasKf, kfAt, toggleKf, setSpeed, maxDuration, FORMAT
 import { FILTERS, TRANSITIONS, MOTIONS, ANIM_IN, ANIM_OUT, LOOPS, BLENDS, FONTS, FX_TYPES } from './catalog.js';
 import { clipWords } from './captions.js';
 import { transcribe } from './retakes.js';
+import { LOCAL_MODELS, localQuality, setLocalQuality } from './asr.js';
+import { toast } from './ui.js';
 
 const KIND = {
   video: { icon: 'film', name: 'Wideo' }, image: { icon: 'image', name: 'Zdjęcie' },
@@ -225,10 +227,13 @@ export class Inspector {
     const box = h('div', { class: 'words-box' });
     const info = h('div', { class: 'muted', style: { fontSize: '12px' } });
     let spans = [];
+    let busy = false;
     const fill = () => {
+      if (busy) return;
       const c = this.C();
       const m = c && this.app.media.get(c.mediaId);
       if (!m) return;
+      redoBtn.style.display = m.hasAudio && m.transcript && m.transcript.segments ? '' : 'none';
       if (!m.hasAudio) { box.replaceChildren(h('span', { class: 'muted' }, 'Ten klip nie ma dźwięku.')); info.textContent = ''; return; }
       if (!m.transcript || !m.transcript.segments) {
         const b = h('button', { class: 'btn sm primary' }, ic('audio-lines'), 'Rozpoznaj słowa');
@@ -255,8 +260,22 @@ export class Inspector {
         kids.push(s);
       });
       box.replaceChildren(...(kids.length ? kids : [h('span', { class: 'muted' }, 'Nie usłyszałem tu żadnych słów.')]));
-      info.textContent = words.length ? `${words.length} słów • kliknij słowo, żeby przejść w to miejsce` : '';
+      const by = m.transcript.model ? ` • rozpoznał: ${m.transcript.model}` : '';
+      info.textContent = (words.length ? `${words.length} słów • kliknij słowo, żeby przejść w to miejsce` : '') + by;
     };
+    // jeszcze raz (np. po przełączeniu na dokładniejszy model)
+    const redo = async () => {
+      const c = this.C();
+      const m = c && this.app.media.get(c.mediaId);
+      if (!m || !m.hasAudio || busy) return;
+      busy = true;
+      redoBtn.disabled = true;
+      box.replaceChildren(h('span', { class: 'muted' }, 'Słucham jeszcze raz…'));
+      info.textContent = 'Rozpoznaję mowę ponownie…';
+      try { await transcribe(this.app, m, (t) => { info.textContent = t; }, true); busy = false; fill(); toast('Słowa rozpoznane ponownie', 'ok'); } catch (e) { busy = false; fill(); info.textContent = e.message; }
+      redoBtn.disabled = false;
+    };
+    const redoBtn = this.btn('Rozpoznaj ponownie', 'refresh-cw', redo);
     let lastSig = '';
     this.updaters.push(() => {
       const c = this.C();
@@ -270,7 +289,26 @@ export class Inspector {
       info, box,
       h('div', { class: 'btn-row' },
         this.btn('Zrób z nich napisy', 'captions', () => this.app.openCaptions(this.store.sel)),
-        this.btn('Usuń powtórki', 'scissors-line-dashed', () => this.app.openRetakes(this.store.sel))),
+        this.btn('Usuń powtórki', 'scissors-line-dashed', () => this.app.openRetakes(this.store.sel)),
+        redoBtn),
+      ...(this.app.serverLocal ? [] : [this.qualitySeg()]),
+    ]);
+  }
+
+  // dokładność rozpoznawania mowy w aplikacji (telefon / bez laptopa)
+  qualitySeg() {
+    return this.seg('Dokładność', {
+      get: () => localQuality(),
+      set: (v) => setLocalQuality(v),
+      options: Object.entries(LOCAL_MODELS).map(([k, m]) => ({ v: k, label: m.name, title: `${m.name} – model ${m.size}` })),
+    });
+  }
+  speechSec() {
+    return this.sec('Rozpoznawanie mowy', 'audio-lines', [
+      this.qualitySeg(),
+      h('div', { class: 'tip' }, ic('lightbulb'), h('span', null, this.app.serverLocal
+        ? 'Na tym komputerze mowę rozpoznaje laptop (dokładny model na karcie graficznej). To ustawienie działa w telefonie i bez laptopa.'
+        : '„Dokładne” dużo lepiej rozumie polski (model ok. 250 MB, pobiera się raz). „Szybkie” waży ok. 77 MB, ale częściej się myli.')),
     ]);
   }
 
@@ -564,6 +602,7 @@ export class Inspector {
           this.toggle('Magnes', { get: () => this.P().magnet, set: (v) => { this.P().magnet = v; repackMain(this.P()); } }),
           this.toggle('Przyciąganie', { get: () => this.P().snap, set: (v) => { this.P().snap = v; } }),
         ]),
+        this.speechSec(),
         this.sec('Informacje', 'info', [info]),
         this.sec('Jak zacząć', 'graduation-cap', [
           h('div', { class: 'tip' }, ic('upload'), h('span', null, 'Zaimportuj filmy i zdjęcia (lub przeciągnij je do okna). Plusik na miniaturze dodaje klip na koniec.')),

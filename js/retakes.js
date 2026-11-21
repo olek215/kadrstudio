@@ -55,7 +55,7 @@ export function similarity(A, B) {
 }
 
 // ------------------------------------------------------------------ rozpoznawanie mowy (asr.js: komputer albo sama aplikacja)
-export function transcribe(app, m, onStatus) { return transcribeMedia(app, m, onStatus); }
+export function transcribe(app, m, onStatus, force) { return transcribeMedia(app, m, onStatus, force); }
 
 // ------------------------------------------------------------------ wypowiedzi
 function makeUtt(c, words) {
