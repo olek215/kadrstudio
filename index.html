@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>KadrStudio</title>
+  <meta name="description" content="KadrStudio – edytor rolek i filmów">
+  <meta name="theme-color" content="#0b0b12">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:ital,wght@0,500;0,700;0,900;1,900&family=Poppins:wght@500;700;900&family=Bebas+Neue&family=Anton&family=Bangers&family=Righteous&family=Pacifico&family=Lobster&family=Permanent+Marker&family=Caveat:wght@700&family=Oswald:wght@500;700&family=Playfair+Display:ital,wght@0,700;1,700&family=Press+Start+2P&family=Rubik+Mono+One&display=swap">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <!-- ======================= EKRAN STARTOWY ======================= -->
+  <div id="start" class="screen">
+    <div class="start-bg"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
+    <div class="start-inner">
+      <header class="start-head">
+        <div class="logo big"><span class="logo-mark"></span><span>Kadr<b>Studio</b></span></div>
+        <p class="tagline">Rób rolki, shortsy i filmy – szybko, ładnie i za darmo.</p>
+        <div class="install-card hidden" id="install-card">
+          <div class="install-ic"><i data-lucide="smartphone"></i></div>
+          <div class="install-txt"><b>Zainstaluj KadrStudio jako aplikację</b><span id="install-hint">Ikona na ekranie telefonu, otwiera się bez paska przeglądarki i działa nawet bez laptopa.</span></div>
+          <button class="btn primary" id="btn-install"><i data-lucide="download"></i><span>Zainstaluj</span></button>
+        </div>
+      </header>
+      <section class="auto-hero">
+        <div class="auto-hero-ic"><i data-lucide="wand-sparkles"></i></div>
+        <div class="auto-hero-txt">
+          <b>Zrób film automatycznie</b>
+          <span>Wybierz filmy i zdjęcia – resztę zrobię sam: najlepsze ujęcia, cięcia w rytm muzyki, przejścia i efekty.</span>
+          <div class="seg" id="auto-fmt">
+            <button data-f="9:16">Rolka 9:16</button><button data-f="16:9">Film 16:9</button><button data-f="1:1">Kwadrat</button><button data-f="4:5">Post 4:5</button>
+          </div>
+        </div>
+        <button class="btn primary big" id="auto-go"><i data-lucide="sparkles"></i><span>Wybierz pliki</span></button>
+      </section>
+      <section>
+        <h2 class="sec-title">Albo zrób wszystko sam – nowy projekt</h2>
+        <div id="format-cards" class="format-cards"></div>
+      </section>
+      <section>
+        <div class="sec-row"><h2 class="sec-title">Twoje projekty</h2><span id="proj-count" class="muted"></span></div>
+        <div id="project-list" class="project-list"></div>
+      </section>
+      <footer class="start-foot muted">Wszystko zostaje na tym komputerze – nic nie jest wysyłane do internetu.</footer>
+    </div>
+  </div>
+
+  <!-- ========================== EDYTOR ============================ -->
+  <div id="editor" class="screen hidden">
+    <header class="topbar">
+      <button class="icon-btn" id="btn-home" title="Projekty"><i data-lucide="layout-grid"></i></button>
+      <div class="logo"><span class="logo-mark"></span><span class="logo-text">Kadr<b>Studio</b></span></div>
+      <input id="project-name" class="project-name" spellcheck="false" maxlength="60">
+      <span id="save-state" class="save-state"></span>
+      <div class="spacer"></div>
+      <button class="icon-btn" id="btn-undo" title="Cofnij (Ctrl+Z)"><i data-lucide="undo-2"></i></button>
+      <button class="icon-btn" id="btn-redo" title="Ponów (Ctrl+Y)"><i data-lucide="redo-2"></i></button>
+      <button class="icon-btn hide-sm" id="btn-help" title="Skróty klawiszowe"><i data-lucide="keyboard"></i></button>
+      <button class="icon-btn hide-sm hidden" id="btn-phone" title="KadrStudio na telefonie (kod QR)"><i data-lucide="smartphone"></i></button>
+      <button class="btn auto-btn" id="btn-auto" title="Program sam złoży film z Twoich plików"><i data-lucide="wand-sparkles"></i><span>Auto-montaż</span></button>
+      <button class="btn primary" id="btn-export"><i data-lucide="download"></i><span>Eksportuj</span></button>
+    </header>
+
+    <main class="workspace">
+      <aside class="library panel" id="library">
+        <nav class="lib-rail" id="lib-rail"></nav>
+        <div class="lib-panel" id="lib-panel"></div>
+      </aside>
+
+      <section class="stage panel">
+        <div class="stage-bar">
+          <span class="chip" id="fmt-chip"></span>
+          <div class="spacer"></div>
+          <button class="icon-btn sm" id="btn-safe" title="Strefy bezpieczne (napisy aplikacji)"><i data-lucide="smartphone"></i></button>
+          <button class="icon-btn sm" id="btn-grid" title="Siatka trójpodziału"><i data-lucide="grid-3x3"></i></button>
+          <select id="preview-quality" class="mini-select" title="Jakość podglądu">
+            <option value="auto">Podgląd: auto</option>
+            <option value="full">Podgląd: pełny</option>
+            <option value="low">Podgląd: szybki</option>
+          </select>
+          <button class="icon-btn sm" id="btn-snapshot" title="Zapisz klatkę jako PNG"><i data-lucide="camera"></i></button>
+          <button class="icon-btn sm" id="btn-fullscreen" title="Pełny ekran"><i data-lucide="maximize"></i></button>
+        </div>
+        <div class="viewport" id="viewport">
+          <div class="canvas-wrap" id="canvas-wrap">
+            <canvas id="preview"></canvas>
+            <canvas id="overlay"></canvas>
+            <div class="empty-hint" id="empty-hint">
+              <i data-lucide="film"></i>
+              <b>Dodaj filmy i zdjęcia</b>
+              <span>Przeciągnij pliki tutaj albo kliknij „Importuj”.</span>
+            </div>
+          </div>
+        </div>
+        <div class="transport">
+          <span class="tc" id="tc-now">00:00.0</span>
+          <div class="transport-btns">
+            <button class="icon-btn sm" id="btn-start" title="Na początek (Home)"><i data-lucide="skip-back"></i></button>
+            <button class="icon-btn sm" id="btn-prev" title="Klatka wstecz (←)"><i data-lucide="chevron-left"></i></button>
+            <button class="play-btn" id="btn-play" title="Odtwórz / pauza (Spacja)"><i data-lucide="play"></i></button>
+            <button class="icon-btn sm" id="btn-next" title="Klatka dalej (→)"><i data-lucide="chevron-right"></i></button>
+            <button class="icon-btn sm" id="btn-end" title="Na koniec (End)"><i data-lucide="skip-forward"></i></button>
+          </div>
+          <span class="tc muted" id="tc-dur">00:00.0</span>
+          <button class="icon-btn sm" id="btn-loop" title="Zapętlaj odtwarzanie"><i data-lucide="repeat"></i></button>
+        </div>
+      </section>
+
+      <aside class="inspector panel" id="inspector"></aside>
+    </main>
+
+    <div class="tl-splitter" id="tl-splitter" title="Przeciągnij, aby zmienić wysokość"></div>
+    <section class="timeline" id="timeline"></section>
+
+    <nav class="mobile-nav" id="mobile-nav">
+      <button data-sheet="library" data-tab="media"><i data-lucide="film"></i><span>Media</span></button>
+      <button data-action="auto" class="nav-auto"><i data-lucide="wand-sparkles"></i><span>Auto</span></button>
+      <button data-sheet="library" data-tab="text"><i data-lucide="type"></i><span>Tekst</span></button>
+      <button data-sheet="library" data-tab="fx"><i data-lucide="sparkles"></i><span>Efekty</span></button>
+      <button data-sheet="inspector"><i data-lucide="sliders-horizontal"></i><span>Edytuj</span></button>
+    </nav>
+  </div>
+
+  <div id="drop-overlay" class="drop-overlay hidden"><div><i data-lucide="upload"></i><b>Upuść pliki, aby je dodać</b></div></div>
+  <div id="modal-root"></div>
+  <div id="menu-root"></div>
+  <div id="toasts"></div>
+  <input type="file" id="file-input" multiple accept="video/*,image/*,audio/*,.mkv,.mov,.avi,.m4a,.mp3,.wav,.ogg,.flac" hidden>
+
+  <script src="vendor/lucide.min.js"></script>
+  <script src="vendor/mp4-muxer.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

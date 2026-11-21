@@ -1,0 +1,21 @@
+{
+  "id": "./",
+  "name": "KadrStudio – edytor rolek i filmów",
+  "short_name": "KadrStudio",
+  "description": "Rób rolki, shortsy i filmy: auto-montaż, napisy z mowy, usuwanie powtórek, przejścia, filtry, muzyka, eksport MP4.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#09090f",
+  "theme_color": "#0b0b12",
+  "lang": "pl",
+  "categories": ["photo", "video", "entertainment"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

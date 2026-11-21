@@ -1,0 +1,12 @@
+# prywatne pliki i rzeczy tylko z tego komputera – nie trafiają do internetu
+Filmy/
+Projekty/
+mowa/
+.tmp/
+samples/
+__pycache__/
+*.pyc
+*.part
+*.cmd
+*.lnk
+telefon.html
