@@ -16,7 +16,7 @@ import { Inspector } from './inspector.js';
 import { Library } from './library.js';
 import { openExport } from './exporter.js';
 import { openAutoMontage } from './automontage.js';
-import { openRetakes } from './retakes.js';
+import { openRetakes, openAutoRetakes } from './retakes.js';
 import { openCaptions } from './captions.js';
 import { openSpeechFx } from './speechfx.js';
 import { FX_TYPES } from './catalog.js';
@@ -312,9 +312,10 @@ class App {
     this.player.play();
     const info = [`${res.cuts} ujęć`, fmtTime(res.duration, 0), res.bpm ? `rytm ${res.bpm} BPM` : null, ...(res.extra || [])].filter(Boolean).join(' • ');
     toast(`Film gotowy! ${info}`, 'ok', 12000, [
+      res.retakes ? { label: `Powtórki (${res.retakes})`, icon: 'scissors-line-dashed', run: () => openAutoRetakes(this) } : null,
       { label: 'Inna wersja', icon: 'dices', run: () => again() },
       { label: 'Eksportuj', icon: 'download', run: () => openExport(this) },
-    ]);
+    ].filter(Boolean));
   }
   async importFiles(files, where, opts = {}) {
     const P = this.store.project;

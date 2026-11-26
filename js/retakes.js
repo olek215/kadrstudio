@@ -280,7 +280,8 @@ function showResults(app, m, res) {
       h('div', null, utts.map((u) => h('div', null, h('span', { class: 'rt-time' }, fmtTime(u.tlStart)), ' ', u.text))));
     if (!groups.length) {
       m.setTitle('Usuń powtórki');
-      m.setBody(h('div', { class: 'rt-none' }, ic('circle-check'), h('b', null, 'Nie znalazłem powtórek'), h('span', { class: 'muted' }, 'Nie mówisz tego samego kilka razy pod rząd.')), transcript);
+      const auto = autoLink(app, m);
+      m.setBody(h('div', { class: 'rt-none' }, ic('circle-check'), h('b', null, 'Nie znalazłem powtórek'), h('span', { class: 'muted' }, auto ? 'W filmie na osi czasu nie ma już powtórzonych zdań.' : 'Nie mówisz tego samego kilka razy pod rząd.')), auto, transcript);
       m.setFoot(h('button', { class: 'btn primary', onclick: () => m.close() }, 'OK'));
       return;
     }
@@ -292,6 +293,7 @@ function showResults(app, m, res) {
       h('div', { class: 'rt-list' }, cards),
       h('label', { class: 'am-check', style: { marginTop: '12px' } }, h('span', { class: 'switch' }, cb, h('span')), 'Wytnij też wtrącenia między wersjami („jeszcze raz”, „yyy”, „nie, czekaj”)'),
       transcript,
+      autoLink(app, m),
     );
     m.setFoot(
       h('span', { class: 'muted', style: { marginRight: 'auto', fontSize: '13px' } }, `Film skróci się o ${fmtDur(saved)}`),
@@ -311,4 +313,99 @@ function showResults(app, m, res) {
     toast(`Usunięto ${n} ${n === 1 ? 'powtórkę' : n < 5 ? 'powtórki' : 'powtórek'} (film krótszy o ${fmtDur(cut)}). Ctrl+Z cofa.`, 'ok', 6000);
   };
   render();
+}
+
+// ------------------------------------------------------------------ co wyciął Auto-montaż
+function autoCount(P) { return ((P && P.autoRetakes) || []).reduce((n, g) => n + g.takes.length - 1, 0); }
+function autoLink(app, m) {
+  const n = autoCount(app.store.project);
+  if (!n) return null;
+  return h('div', { class: 'tip', style: { marginTop: '12px', marginBottom: 0 } }, ic('wand-sparkles'),
+    h('span', null, `Auto-montaż wyciął już ${n} ${n === 1 ? 'powtórkę' : n < 5 ? 'powtórki' : 'powtórek'} z nagrań. `),
+    h('button', { class: 'btn sm', onclick: () => { m.close(); openAutoRetakes(app); } }, ic('eye'), 'Pokaż'));
+}
+// gdzie w filmie jest dany moment nagrania (null, jeśli go już nie ma na osi czasu)
+function timelinePos(app, mediaId, a) {
+  for (const c of app.store.project.clips) {
+    if (c.mediaId !== mediaId || (c.kind !== 'video' && c.kind !== 'audio')) continue;
+    const sp = c.speed || 1, cin = c.in || 0;
+    if (a >= cin - 0.3 && a < cin + c.duration * sp) return { clip: c, t: c.start + Math.max(0, a - cin) / sp };
+  }
+  return null;
+}
+
+// Okno „Wycięte powtórki”: każda grupa powtórzonych zdań z Auto-montażu – która wersja została,
+// które wypadły i gdzie były w nagraniu. ▶ pokazuje wersję z oryginalnego pliku (także wyciętą).
+export function openAutoRetakes(app) {
+  const P = app.store.project;
+  const list = (P && P.autoRetakes) || [];
+  const n = autoCount(P);
+  if (!n) { toast('Auto-montaż nie wyciął w tym projekcie żadnych powtórek.', 'info', 4000); return; }
+  app.player.pause();
+  const video = h('video', { class: 'rt-video', playsinline: '', preload: 'metadata' });
+  const cap = h('div', { class: 'rt-vcap muted' }, 'Kliknij ▶ przy wersji, żeby ją obejrzeć i odsłuchać.');
+  let stopAt = null, raf = 0, playing = null;
+  const stop = () => {
+    video.pause();
+    cancelAnimationFrame(raf);
+    stopAt = null;
+    if (playing) { playing.replaceChildren(ic('play')); playing = null; }
+  };
+  const tick = () => { if (stopAt != null && video.currentTime >= stopAt) { stop(); return; } raf = requestAnimationFrame(tick); };
+  const play = async (g, x, btn, label) => {
+    if (playing === btn) { stop(); return; }
+    stop();
+    const md = app.media.get(g.mediaId);
+    if (!md || !md.url) { toast('Nie mogę otworzyć tego nagrania – plik usunięto z projektu?', 'err', 5000); return; }
+    if (video.dataset.mid !== md.id) {
+      video.dataset.mid = md.id;
+      video.src = md.url;
+      await new Promise((r) => { video.addEventListener('loadedmetadata', r, { once: true }); video.addEventListener('error', r, { once: true }); });
+    }
+    cap.textContent = label;
+    video.currentTime = Math.max(0, x.a - 0.15);
+    stopAt = x.b + 0.25;
+    playing = btn;
+    btn.replaceChildren(ic('square'));
+    try { await video.play(); raf = requestAnimationFrame(tick); } catch { stop(); toast('Nie udało się odtworzyć tego fragmentu.', 'err'); }
+  };
+  const m = modal({ title: `Wycięte powtórki: ${n}`, icon: 'scissors-line-dashed', wide: true, onClose: stop });
+  const playBtn = (g, x, label) => {
+    const b = h('button', { class: 'icon-btn sm', title: 'Obejrzyj i odsłuchaj' }, ic('play'));
+    b.addEventListener('click', (e) => { e.stopPropagation(); play(g, x, b, label); });
+    return b;
+  };
+  const cards = list.map((g, gi) => {
+    const rows = g.takes.map((x) => {
+      const where = `${fmtTime(x.a)} w nagraniu „${g.name}”`;
+      let show = null;
+      if (x.keep) {
+        show = h('button', { class: 'btn sm', title: 'Przejdź do tego zdania w filmie' }, ic('locate'), 'W filmie');
+        show.addEventListener('click', () => {
+          const p = timelinePos(app, g.mediaId, x.a);
+          if (!p) { toast('Tego zdania nie ma już w filmie.', 'info', 4000); return; }
+          m.close();
+          app.store.select(p.clip.id);
+          app.player.seek(p.t);
+        });
+      }
+      return h('div', { class: `rt-take${x.keep ? ' on' : ' cut'}` },
+        playBtn(g, x, `${x.keep ? 'Zostawiona' : 'Wycięta'} wersja – ${where}`),
+        h('span', { class: 'rt-time', title: 'czas w oryginalnym nagraniu' }, fmtTime(x.a)),
+        h('span', { class: 'rt-text' }, `„${x.text}”`),
+        x.partial ? h('span', { class: 'rt-bdg warn' }, 'ucięte') : null,
+        h('span', { class: `rt-bdg ${x.keep ? 'ok' : 'cut'}` }, x.keep ? '✓ zostawione' : '✂ wycięte'),
+        show);
+    });
+    const extras = g.extras.map((x) => h('div', { class: 'rt-extra' },
+      playBtn(g, x, `Wtrącenie – ${fmtTime(x.a)} w nagraniu „${g.name}”`), ic('message-square-x'), `wtrącenie: „${x.text}” – wycięte`));
+    return h('div', { class: 'rt-group' },
+      h('div', { class: 'rt-head' }, h('b', null, `Powtórka ${gi + 1}`), h('span', { class: 'muted' }, ` – ${g.takes.length} wersje w „${g.name}”`)),
+      rows, extras);
+  });
+  m.setBody(h('div', { class: 'rt-view' },
+    h('div', { class: 'tip' }, ic('lightbulb'), h('span', null, 'Auto-montaż zostawił w filmie najlepszą wersję każdego powtórzonego zdania, a resztę wyciął. ▶ odtwarza wersję z oryginalnego nagrania – także wyciętą. Czas to miejsce w nagraniu.')),
+    h('div', { class: 'rt-player' }, video, cap),
+    h('div', { class: 'rt-list' }, cards)));
+  m.setFoot(h('button', { class: 'btn primary', onclick: () => m.close() }, 'Zamknij'));
 }

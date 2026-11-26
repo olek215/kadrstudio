@@ -359,6 +359,8 @@ export async function buildMontage(app, o, step = () => {}) {
     }
   }
   const keepSound = S.keepAudio || o.clipAudio === 'keep';
+  const removedRetakes = []; // co wypadło jako powtórka – do podglądu „Wycięte powtórki”
+  const r2 = (x) => Math.round(x * 100) / 100;
   for (const m of vids) {
     m._utts = [];
     m._voiceOnly = false;
@@ -370,6 +372,11 @@ export async function buildMontage(app, o, step = () => {}) {
       for (const g of findRetakes(utts)) {
         for (const tk of g.takes) if (tk !== g.keep) drop.add(tk);
         for (const ex of g.extras) drop.add(ex);
+        removedRetakes.push({
+          mediaId: m.id, name: m.name,
+          takes: g.takes.map((tk) => ({ a: r2(tk.srcStart), b: r2(tk.srcEnd), text: tk.text, keep: tk === g.keep, partial: !!tk.partial })),
+          extras: g.extras.map((ex) => ({ a: r2(ex.srcStart), b: r2(ex.srcEnd), text: ex.text })),
+        });
       }
       m._utts = utts.filter((u) => !drop.has(u) && !isRestart(u));
     }
@@ -606,13 +613,18 @@ export async function buildMontage(app, o, step = () => {}) {
     P.clips.push(tc);
     app.loadFont(tc);
   }
+  // zapamiętaj, co wycięto jako powtórki (okno „Wycięte powtórki” odtwarza je z oryginalnego nagrania)
+  if (removedRetakes.length) P.autoRetakes = o.replace || !P.autoRetakes ? removedRetakes : [...P.autoRetakes, ...removedRetakes];
+  else if (o.replace) delete P.autoRetakes;
+  const nRetakes = removedRetakes.reduce((n, g) => n + g.takes.length - 1, 0);
   normalize(P);
   const extra = [...warnings];
+  if (nRetakes) extra.push(`wycięte powtórki: ${nRetakes}`);
   if (speechMade.length) extra.push(`mowa: ${speechMade.length} ${speechMade.length === 1 ? 'fragment' : 'fragmenty'}`);
   if (caps) extra.push(`napisy: ${caps}`);
   if (keyFx) extra.push(`efekty ze słów: ${keyFx}`);
   if (accents) extra.push(`akcenty: ${accents}`);
-  return { duration: end - t0, cuts: segs.length, bpm: music ? Math.round(bpm) : null, music: music ? music.name : null, extra };
+  return { duration: end - t0, cuts: segs.length, bpm: music ? Math.round(bpm) : null, music: music ? music.name : null, extra, retakes: nRetakes };
 }
 
 // ------------------------------------------------------------------ okno

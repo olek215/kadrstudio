@@ -512,6 +512,18 @@ input[type=range]::-moz-range-thumb { width: 15px; height: 15px; border-radius: 
 .rt-none { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 18px 0; text-align: center; }
 .rt-none svg { width: 40px; height: 40px; color: var(--ok); }
 @media (max-width: 900px) { .tl-retakes span { display: none; } .rt-stars, .rt-time { display: none; } }
+/* okno „Wycięte powtórki” (po Auto-montażu) */
+.rt-view .rt-take { cursor: default; opacity: 1; }
+.rt-view .rt-take.cut { opacity: .78; }
+.rt-view .rt-time { display: inline; }
+.rt-bdg.ok { background: rgba(34, 197, 94, .2); color: #86efac; }
+.rt-bdg.cut { background: rgba(248, 113, 113, .18); color: #fca5a5; }
+.rt-player { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-bottom: 10px; }
+.rt-video { width: 100%; height: 190px; background: #000; border-radius: 12px; object-fit: contain; }
+.rt-vcap { font-size: 12px; text-align: center; }
+.rt-view .rt-list { max-height: 40vh; }
+.rt-extra .icon-btn svg { color: inherit; }
+@media (max-width: 900px) { .rt-view .rt-take { flex-wrap: wrap; } .rt-view .rt-text { flex: 1 1 calc(100% - 90px); } .rt-video { height: 160px; } }
 .toast .btn.sm { height: 28px; margin-left: 4px; }
 .toast .icon-btn.sm { width: 26px; height: 26px; }
 .mobile-nav { display: none; }
